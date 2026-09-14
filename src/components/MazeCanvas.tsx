@@ -1,7 +1,208 @@
-import React,{useRef}from"react";
-import{Maze,endZoneCells}from"../engine/maze";
-import{RobotState}from"../engine/robot";
-import{Cell,key}from"../types/maze";
+import React, { useRef } from "react";
+import { Maze, endZoneCells } from "../engine/maze";
+import { RobotState } from "../engine/robot";
+import { Cell, key } from "../types/maze";
 
-type Props={maze:Maze;robot:RobotState;tool:"draw"|"erase"|"start"|"end";onEdit:(c:Cell)=>void;observerMode?:boolean};
-export default function MazeCanvas({maze,robot,tool,onEdit,observerMode=false}:Props){const last=useRef<string|null>(null),n=maze.size,size=760,cell=size/n,visible=maze.roads,trace=new Set(robot.trace.map(key)),route=new Set(robot.route.map(key)),benchmark=new Set(maze.referenceShortest.map(key)),endZone=endZoneCells(maze);const from=(e:React.PointerEvent<SVGSVGElement>):Cell|null=>{const r=e.currentTarget.getBoundingClientRect(),x=Math.floor((e.clientX-r.left)/r.width*n),y=Math.floor((e.clientY-r.top)/r.height*n);return x>=0&&y>=0&&x<n&&y<n?{x,y}:null};const paint=(e:React.PointerEvent<SVGSVGElement>)=>{const c=from(e);if(!c)return;const k=key(c);if(k===last.current&&tool!=="start"&&tool!=="end")return;last.current=k;onEdit(c)};return <div className="maze-shell"><div className="maze-hint">{observerMode?"Observer benchmark is visual only. Robot receives local sensor data.":`Editor: ${tool}`}</div><svg viewBox={`0 0 ${size} ${size}`} className="maze-canvas" onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);last.current=null;paint(e)}} onPointerMove={e=>{if(e.buttons&1)paint(e)}} onPointerUp={()=>last.current=null} onPointerCancel={()=>last.current=null}><rect width={size} height={size} fill="#07090d"/>{Array.from({length:n+1},(_,i)=><React.Fragment key={i}><line x1={i*cell} y1="0" x2={i*cell} y2={size} className="grid-line"/><line x1="0" y1={i*cell} x2={size} y2={i*cell} className="grid-line"/></React.Fragment>)}{observerMode&&[...benchmark].map(k=>{const[x,y]=k.split(",").map(Number);return <rect key={`b-${k}`} x={x*cell+cell*.28} y={y*cell+cell*.28} width={cell*.44} height={cell*.44} rx="2" className="benchmark-road"/>})}{[...visible].map(k=>{const[x,y]=k.split(",").map(Number),isR=route.has(k),isT=trace.has(k);return <rect key={k} x={x*cell+cell*.17} y={y*cell+cell*.17} width={cell*.66} height={cell*.66} rx="3" className={isR?"road route-road":isT?"road trace-road":"road"/>})}{[...endZone].map(k=>{const[x,y]=k.split(",").map(Number);return <rect key={`ez-${k}`} x={x*cell+cell*.06} y={y*cell+cell*.06} width={cell*.88} height={cell*.88} className="end-zone"/>})}{[...maze.checkpoints].map(k=>{const[x,y]=k.split(",").map(Number);return <circle key={`cp-${k}`} cx={(x+.5)*cell} cy={(y+.5)*cell} r={cell*.12} className="checkpoint-marker"/>})}<circle cx={(maze.start.x+.5)*cell} cy={(maze.start.y+.5)*cell} r={cell*.31} className="start-marker"/><text x={(maze.start.x+.5)*cell} y={(maze.start.y+.5)*cell+4} className="marker-text">S</text><text x={(maze.end.x+.5)*cell} y={(maze.end.y+.5)*cell+4} className="end-label">END</text><circle cx={(robot.pos.x+.5)*cell} cy={(robot.pos.y+.5)*cell} r={cell*.25} className="robot-marker"/><text x={(robot.pos.x+.5)*cell} y={(robot.pos.y+.5)*cell+3} className="robot-text">R</text></svg></div>}
+type Tool = "draw" | "erase" | "start" | "end";
+
+type Props = {
+  maze: Maze;
+  robot: RobotState;
+  tool: Tool;
+  onEdit: (cell: Cell) => void;
+  observerMode?: boolean;
+};
+
+export default function MazeCanvas({
+  maze,
+  robot,
+  tool,
+  onEdit,
+  observerMode = false,
+}: Props) {
+  const lastCell = useRef<string | null>(null);
+  const n = maze.size;
+  const size = 760;
+  const cell = size / n;
+  const trace = new Set(robot.trace.map(key));
+  const route = new Set(robot.route.map(key));
+  const benchmark = new Set(maze.referenceShortest.map(key));
+  const endZone = endZoneCells(maze);
+
+  const cellFromPointer = (
+    event: React.PointerEvent<SVGSVGElement>,
+  ): Cell | null => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = Math.floor(((event.clientX - rect.left) / rect.width) * n);
+    const y = Math.floor(((event.clientY - rect.top) / rect.height) * n);
+    if (x < 0 || y < 0 || x >= n || y >= n) return null;
+    return { x, y };
+  };
+
+  const paint = (event: React.PointerEvent<SVGSVGElement>) => {
+    const cellPosition = cellFromPointer(event);
+    if (!cellPosition) return;
+    const cellKey = key(cellPosition);
+    if (
+      cellKey === lastCell.current &&
+      tool !== "start" &&
+      tool !== "end"
+    ) {
+      return;
+    }
+    lastCell.current = cellKey;
+    onEdit(cellPosition);
+  };
+
+  return (
+    <div className="maze-shell">
+      <div className="maze-hint">
+        {observerMode
+          ? "Observer benchmark is visual only. Robot receives local sensor data."
+          : `Editor: ${tool}`}
+      </div>
+
+      <svg
+        viewBox={`0 0 ${size} ${size}`}
+        className="maze-canvas"
+        onPointerDown={(event) => {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          lastCell.current = null;
+          paint(event);
+        }}
+        onPointerMove={(event) => {
+          if (event.buttons & 1) paint(event);
+        }}
+        onPointerUp={() => {
+          lastCell.current = null;
+        }}
+        onPointerCancel={() => {
+          lastCell.current = null;
+        }}
+      >
+        <rect width={size} height={size} fill="#07090d" />
+
+        {Array.from({ length: n + 1 }, (_, index) => (
+          <React.Fragment key={index}>
+            <line
+              x1={index * cell}
+              y1="0"
+              x2={index * cell}
+              y2={size}
+              className="grid-line"
+            />
+            <line
+              x1="0"
+              y1={index * cell}
+              x2={size}
+              y2={index * cell}
+              className="grid-line"
+            />
+          </React.Fragment>
+        ))}
+
+        {observerMode &&
+          [...benchmark].map((cellKey) => {
+            const [x, y] = cellKey.split(",").map(Number);
+            return (
+              <rect
+                key={`benchmark-${cellKey}`}
+                x={x * cell + cell * 0.28}
+                y={y * cell + cell * 0.28}
+                width={cell * 0.44}
+                height={cell * 0.44}
+                rx="2"
+                className="benchmark-road"
+              />
+            );
+          })}
+
+        {[...maze.roads].map((cellKey) => {
+          const [x, y] = cellKey.split(",").map(Number);
+          const isRoute = route.has(cellKey);
+          const isTrace = trace.has(cellKey);
+          return (
+            <rect
+              key={cellKey}
+              x={x * cell + cell * 0.17}
+              y={y * cell + cell * 0.17}
+              width={cell * 0.66}
+              height={cell * 0.66}
+              rx="3"
+              className={
+                isRoute
+                  ? "road route-road"
+                  : isTrace
+                    ? "road trace-road"
+                    : "road"
+              }
+            />
+          );
+        })}
+
+        {[...endZone].map((cellKey) => {
+          const [x, y] = cellKey.split(",").map(Number);
+          return (
+            <rect
+              key={`end-zone-${cellKey}`}
+              x={x * cell + cell * 0.06}
+              y={y * cell + cell * 0.06}
+              width={cell * 0.88}
+              height={cell * 0.88}
+              className="end-zone"
+            />
+          );
+        })}
+
+        {[...maze.checkpoints].map((cellKey) => {
+          const [x, y] = cellKey.split(",").map(Number);
+          return (
+            <circle
+              key={`checkpoint-${cellKey}`}
+              cx={(x + 0.5) * cell}
+              cy={(y + 0.5) * cell}
+              r={cell * 0.12}
+              className="checkpoint-marker"
+            />
+          );
+        })}
+
+        <circle
+          cx={(maze.start.x + 0.5) * cell}
+          cy={(maze.start.y + 0.5) * cell}
+          r={cell * 0.31}
+          className="start-marker"
+        />
+        <text
+          x={(maze.start.x + 0.5) * cell}
+          y={(maze.start.y + 0.5) * cell + 4}
+          className="marker-text"
+        >
+          S
+        </text>
+
+        <text
+          x={(maze.end.x + 0.5) * cell}
+          y={(maze.end.y + 0.5) * cell + 4}
+          className="end-label"
+        >
+          END
+        </text>
+
+        <circle
+          cx={(robot.pos.x + 0.5) * cell}
+          cy={(robot.pos.y + 0.5) * cell}
+          r={cell * 0.25}
+          className="robot-marker"
+        />
+        <text
+          x={(robot.pos.x + 0.5) * cell}
+          y={(robot.pos.y + 0.5) * cell + 3}
+          className="robot-text"
+        >
+          R
+        </text>
+      </svg>
+    </div>
+  );
+}
