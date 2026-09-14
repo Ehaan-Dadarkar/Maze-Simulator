@@ -44,14 +44,80 @@ function dir(a: Cell, b: Cell): Dir {
   if (b.y > a.y) return "S"; return "N";
 }
 
-function leftFirst(h: Dir): Dir[] {
-  return ({ N: ["W", "N", "E", "S"], E: ["N", "E", "S", "W"],
-    S: ["E", "S", "W", "N"], W: ["S", "W", "N", "E"] } as Record<Dir, Dir[]>)[h];
+function relativeTurn(from: Dir, to: Dir): "S" | "L" | "R" | "B" {
+  if (from === to) return "S";
+  if (to === opposite(from)) return "B";
+  if ((from === "N" && to === "W") || (from === "W" && to === "S") ||
+      (from === "S" && to === "E") || (from === "E" && to === "N")) return "L";
+  return "R";
+}
+
+function turnCost(from: Dir, to: Dir): number {
+  const turn = relativeTurn(from, to);
+  return turn === "S" ? 0 : turn === "R" || turn === "L" ? 1 : 3;
+}
+
+function leftRightTieBreak(h: Dir, a: Dir, b: Dir): Dir {
+  // Direction is only a tie-breaker. This prevents the old global left-first bias
+  // from dominating every junction while keeping behavior deterministic.
+  const rightOrder: Record<Dir, Dir[]> = {
+    N: ["E", "W", "S"], E: ["S", "N", "W"], S: ["W", "E", "N"], W: ["N", "S", "E"],
+  };
+  const order = rightOrder[h];
+  return order.indexOf(a) <= order.indexOf(b) ? a : b;
+}
+
+/**
+ * Adaptive junction policy.
+ *
+ * The robot cannot see the hidden maze or predict an undiscovered route to END.
+ * Therefore this policy deliberately uses only information already available at
+ * the current sensor position:
+ *   1. Never prefer an already-finished edge over an unexplored edge.
+ *   2. Prefer an unexplored straight continuation because it preserves momentum
+ *      and avoids the systematic left-turn bias of the old policy.
+ *   3. Prefer an unexplored turn over an edge already traversed once.
+ *   4. Use the relative turn cost and a deterministic tie-breaker only when the
+ *      exploration state is otherwise equivalent.
+ *
+ * Trémaux traversal limits remain the safety mechanism; this policy only decides
+ * which legal local edge to take next.
+ */
+function chooseAdaptiveExit(r: RobotState, current: Cell, exits: ReturnType<typeof senseLocal>) {
+  const candidates = exits
+    .map((e) => ({
+      ...e,
+      traversals: r.edgeTraversals.get(edge(current, e.cell)) ?? 0,
+      turn: relativeTurn(r.heading, e.dir),
+      cost: turnCost(r.heading, e.dir),
+    }))
+    .filter((e) => e.traversals < 2);
+
+  if (!candidates.length) return null;
+
+  const minTraversals = Math.min(...candidates.map((e) => e.traversals));
+  const frontier = candidates.filter((e) => e.traversals === minTraversals);
+
+  // Among equally unexplored edges, straight is preferred, then the cheaper turn.
+  const sorted = frontier.sort((a, b) => {
+    const straightDelta = Number(a.turn !== "S") - Number(b.turn !== "S");
+    if (straightDelta !== 0) return straightDelta;
+    if (a.cost !== b.cost) return a.cost - b.cost;
+    return 0;
+  });
+
+  const bestCost = sorted[0].cost;
+  const tied = sorted.filter((e) => e.cost === bestCost);
+  if (tied.length === 1) return tied[0];
+
+  // Do not encode a permanent left-first/right-first maze bias.
+  const chosenDir = leftRightTieBreak(r.heading, tied[0].dir, tied[1].dir);
+  return tied.find((e) => e.dir === chosenDir) ?? tied[0];
 }
 
 function local(m: Maze, r: RobotState) {
-  const rank = new Map(leftFirst(r.heading).map((d, i) => [d, i]));
-  return senseLocal(m, r.pos).sort((a, b) => rank.get(a.dir)! - rank.get(b.dir)!);
+  // Preserve the physical sensor order; junction choice is handled separately.
+  return senseLocal(m, r.pos);
 }
 
 function visitEdge(r: RobotState, a: Cell, b: Cell) {
@@ -63,7 +129,7 @@ function discoverCheckpoint(m: Maze, r: RobotState) {
   const k = key(r.pos); if (m.checkpoints.has(k)) r.discoveredCheckpoints.add(k);
 }
 
-/** Trémaux-style exploration using only local exits. Stops immediately when the END sensor activates. */
+/** Trémaux-style adaptive exploration using only local exits. Stops immediately when the END sensor activates. */
 export function buildDryTrace(m: Maze, start: Cell): DryRunResult {
   const r = createRobot(start); r.mode = "dry"; r.status = "Exploring from local sensors";
   discoverAt(m, r); discoverCheckpoint(m, r);
@@ -81,12 +147,12 @@ export function buildDryTrace(m: Maze, start: Cell): DryRunResult {
       else r.junctions.push({ position: { ...current }, exits: exits.map((x) => x.dir), visited: true });
     }
 
+    // END is terminal during Dry Run. The robot must stop here and cannot continue exploring.
     if (isEndZoneCell(m, current)) {
       firstEndIndex = trace.length - 1; endCell = { ...current }; r.led = true; break;
     }
 
-    const next = exits.map((e) => ({ ...e, traversals: r.edgeTraversals.get(edge(current, e.cell)) ?? 0 }))
-      .filter((e) => e.traversals < 2).sort((a, b) => a.traversals - b.traversals)[0];
+    const next = chooseAdaptiveExit(r, current, exits);
 
     if (!next) {
       stack.pop(); if (!stack.length) break;
@@ -148,8 +214,7 @@ export function simplifyTurns(route: Cell[]): string[] {
   const out: string[] = [];
   for (let i = 1; i < route.length - 1; i++) {
     const a = dir(route[i - 1], route[i]), b = dir(route[i], route[i + 1]);
-    out.push(b === a ? "S" : b === opposite(a) ? "B" :
-      ((a === "N" && b === "W") || (a === "W" && b === "S") || (a === "S" && b === "E") || (a === "E" && b === "N")) ? "L" : "R");
+    out.push(relativeTurn(a, b));
   }
   return out;
 }
