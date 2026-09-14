@@ -1,0 +1,15 @@
+import React, { useRef } from "react";
+import { Maze } from "../engine/maze";
+import { RobotState } from "../engine/robot";
+import { Cell, key } from "../types/maze";
+
+type Props={maze:Maze;robot:RobotState;robotView:boolean;tool:"draw"|"erase"|"start"|"end";onEdit:(c:Cell)=>void};
+
+export default function MazeCanvas({maze,robot,robotView,tool,onEdit}:Props){
+  const lastCell=useRef<string|null>(null),n=maze.size,size=760,cell=size/n;
+  const visible=robotView?robot.known.cells:maze.roads;
+  const route=new Set(robot.route.map(key)),trace=new Set(robot.trace.map(key));
+  const cellFromPointer=(e:React.PointerEvent<SVGSVGElement>):Cell|null=>{const r=e.currentTarget.getBoundingClientRect(),x=Math.floor(((e.clientX-r.left)/r.width)*n),y=Math.floor(((e.clientY-r.top)/r.height)*n);return x>=0&&y>=0&&x<n&&y<n?{x,y}:null;};
+  const paint=(e:React.PointerEvent<SVGSVGElement>)=>{const c=cellFromPointer(e);if(!c)return;const k=key(c);if(k===lastCell.current&&tool!=="start"&&tool!=="end")return;lastCell.current=k;onEdit(c);};
+  return <div className="maze-shell"><div className="maze-hint">{robotView?"Robot camera: unknown cells stay hidden.":`Editor: ${tool}. Drag across cells to paint.`}</div><svg viewBox={`0 0 ${size} ${size}`} className="maze-canvas" onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);lastCell.current=null;paint(e)}} onPointerMove={e=>{if(e.buttons&1)paint(e)}} onPointerUp={()=>{lastCell.current=null}} onPointerCancel={()=>{lastCell.current=null}}><rect width={size} height={size} fill="#07090d"/>{Array.from({length:n+1},(_,i)=><React.Fragment key={i}><line x1={i*cell} y1={0} x2={i*cell} y2={size} className="grid-line"/><line x1={0} y1={i*cell} x2={size} y2={i*cell} className="grid-line"/></React.Fragment>)}{[...visible].map(k=>{const[x,y]=k.split(",").map(Number),isRoute=route.has(k),isTrace=trace.has(k);return <rect key={k} x={x*cell+cell*.17} y={y*cell+cell*.17} width={cell*.66} height={cell*.66} rx={3} className={isRoute?"road route-road":isTrace?"road trace-road":"road"}/>})}{!robotView&&<><circle cx={(maze.start.x+.5)*cell} cy={(maze.start.y+.5)*cell} r={cell*.31} className="start-marker"/><text x={(maze.start.x+.5)*cell} y={(maze.start.y+.5)*cell+4} className="marker-text">S</text><circle cx={(maze.end.x+.5)*cell} cy={(maze.end.y+.5)*cell} r={cell*.31} className="end-marker"/><text x={(maze.end.x+.5)*cell} y={(maze.end.y+.5)*cell+4} className="marker-text">E</text></>}<circle cx={(robot.pos.x+.5)*cell} cy={(robot.pos.y+.5)*cell} r={cell*.25} className="robot-marker"/><text x={(robot.pos.x+.5)*cell} y={(robot.pos.y+.5)*cell+3} className="robot-text">R</text></svg></div>;
+}
