@@ -14,15 +14,41 @@ export function discoverAt(m: Maze,r: RobotState): void { for(const exit of sens
 function directionBetween(a: Cell,b: Cell): Dir { if(b.x>a.x)return"E";if(b.x<a.x)return"W";if(b.y>a.y)return"S";return"N"; }
 function orderedExits(m: Maze,r: RobotState) { const priority:Record<Dir,Dir[]>={N:["W","N","E","S"],E:["N","E","S","W"],S:["E","S","W","N"],W:["S","W","N","E"]};const rank=new Map(priority[r.heading].map((d,i)=>[d,i]));return senseLocal(m,r.pos).sort((a,b)=>rank.get(a.dir)!-rank.get(b.dir)!); }
 
-/** Explore only from local sensor observations; stop at the first END. */
+/**
+ * Explore from local sensor observations and map the whole reachable maze.
+ * Reaching END records firstEndIndex but does NOT terminate exploration: the
+ * robot must discover all reachable branches before selecting its final route.
+ */
 export function buildDryTrace(m: Maze,start: Cell): DryRunResult {
   const r=createRobot(start);r.mode="dry";r.status="Exploring";discoverAt(m,r);
   const stack:{cell:Cell;incoming?:Dir}[]=[{cell:{...start}}],visited=new Set<string>([key(start)]),usedEdges=new Set<string>(),trace:Cell[]=[{...start}];
   let backtracks=0,firstEndIndex=-1;
-  while(stack.length){const current=stack[stack.length-1].cell;r.pos={...current};r.heading=stack[stack.length-1].incoming??r.heading;discoverAt(m,r);if(same(current,m.end)){firstEndIndex=trace.length-1;break;}
+  while(stack.length){
+    const current=stack[stack.length-1].cell;
+    r.pos={...current};
+    r.heading=stack[stack.length-1].incoming??r.heading;
+    discoverAt(m,r);
+    if(same(current,m.end)&&firstEndIndex<0)firstEndIndex=trace.length-1;
     const next=orderedExits(m,r).find(candidate=>!usedEdges.has(edge(current,candidate.cell)));
-    if(next){usedEdges.add(edge(current,next.cell));const nextCell={...next.cell},nextKey=key(nextCell);r.heading=next.dir;trace.push(nextCell);if(!visited.has(nextKey)){visited.add(nextKey);stack.push({cell:nextCell,incoming:next.dir});discoverAt(m,r);}continue;}
-    stack.pop();if(stack.length){const parent=stack[stack.length-1].cell;trace.push({...parent});backtracks++;r.heading=opposite(directionBetween(current,parent));}
+    if(next){
+      usedEdges.add(edge(current,next.cell));
+      const nextCell={...next.cell},nextKey=key(nextCell);
+      r.heading=next.dir;
+      trace.push(nextCell);
+      if(!visited.has(nextKey)){
+        visited.add(nextKey);
+        stack.push({cell:nextCell,incoming:next.dir});
+        discoverAt(m,r);
+      }
+      continue;
+    }
+    stack.pop();
+    if(stack.length){
+      const parent=stack[stack.length-1].cell;
+      trace.push({...parent});
+      backtracks++;
+      r.heading=opposite(directionBetween(current,parent));
+    }
   }
   return {trace,known:{cells:new Set(r.known.cells),edges:new Set(r.known.edges)},endReached:firstEndIndex>=0,backtracks,firstEndIndex};
 }
